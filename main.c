@@ -17,7 +17,7 @@ static void sighnd(int sig, siginfo_t* info, void* ctx)
 	ucontext_t* uc = (ucontext_t*)ctx;
 	greg_t* regs = uc->uc_mcontext.gregs;
 
-	// just get registers
+	// just get registers 
 	char* reg_rbx = regs[REG_RBX];
 	unsigned long reg_rcx = regs[REG_RCX];
 
