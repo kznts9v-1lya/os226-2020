@@ -18,6 +18,7 @@ static void sighnd(int sig, siginfo_t* info, void* ctx)
 	greg_t* regs = uc->uc_mcontext.gregs;
 
 	// just get registers 
+	unsigned long reg_rax= regs[REG_RAX];
 	char* reg_rbx = regs[REG_RBX];
 	unsigned long reg_rcx = regs[REG_RCX];
 
@@ -27,9 +28,10 @@ static void sighnd(int sig, siginfo_t* info, void* ctx)
 	uint8_t* next_instr = &instr[2];
 
 	/* interruption instruction in insrt[0],
-	interruption code on instr[1] */
+	interruption code on instr[1],
+	syscall number in reg_rax */
 
-	if(instr[0] != 0xCD || instr[1] != 0x81) 
+	if(instr[0] != 0xCD || instr[1] != 0x81 || reg_rax != os_syscall_nr_print) 
 	{
 		abort();
 	}
