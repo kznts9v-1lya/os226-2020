@@ -1,5 +1,5 @@
 #include "sched.h"
-#include <stdlib.h>
+#include <stdio.h>
 
 struct task {
 	void (*entry)(void *ctx);
@@ -7,6 +7,7 @@ struct task {
 	int priority;
 	int deadline;
 	int id;
+	int timer;
 };
 
 static struct task taskpool[16];
@@ -14,10 +15,8 @@ static int taskpool_n;
 static enum policy currentPolicy;
 static int priorityCounters[11];
 
-void sched_new(void (*entrypoint)(void *aspace),
-		void *aspace,
-		int priority,
-		int deadline) {
+void sched_new(void (*entrypoint)(void *aspace), void *aspace, int priority, int deadline) 
+{
 	struct task *t = &taskpool[taskpool_n];
 	
 	t->entry = entrypoint;
@@ -25,20 +24,38 @@ void sched_new(void (*entrypoint)(void *aspace),
 	t->priority = priority;
 	t->deadline = deadline <= 0? 0 : deadline;
 	t->id = taskpool_n;
+	t->timer = 0;
 
 	taskpool_n++;
 }
 
-
-
-void sched_cont(void (*entrypoint)(void *aspace),
-		void *aspace,
-		int timeout) {
-	
+void sched_cont(void (*entrypoint)(void *aspace), void *aspace, int timeout)
+{
+	for (int i = 0; i < taskpool_n; i++) 
+	{
+		if (taskpool[i].ctx == aspace) 
+		{
+			taskpool[i].timer = timeout;
+			break;
+		}
+	}
 }
 
-void sched_time_elapsed(unsigned amount) {
-	// ...
+void sched_time_elapsed(int amount) 
+{
+	for(int i = 0; i < taskpool_n; i++)
+	{
+		if(taskpool[i].timer > 0)
+		{
+			taskpool[i].timer -= amount;
+
+			if (taskpool[i].timer < 0) 
+			{
+				printf("Undefined behavior.");
+			}
+		}
+		
+	}
 }
 
 void sched_set_policy(enum policy policy) {
@@ -116,60 +133,9 @@ static void deadlineSort()
 
 		taskpool[taskpool_n - 1] = tmp;
 	}
-
-
-
-	/*deadlineCounters = (int*)calloc(deadlineMax, sizeof(int));
-
-	for(int i = 0; i < taskpool_n; i++)
-	{
-		deadlineCounters[taskpool[i].deadline]++;
-	}
-
-	for(int i = 0; i < taskpool_n; i++)
-	{
-		for(int j = 1; j < deadlineMax; j++)
-		{
-			if(taskpool[i].deadline == j && deadlineCounters[j] > 1)
-			{
-				struct task taskpoolDeadline[deadlineCounters[j]];
-			}
-
-
-		}
-	}*/
-
-	/*for(int i = 0; i < taskpool_n; i++)
-	{
-		for(int j = 0; j < deadlineMax; j++)
-		{
-			if(taskpool[i].deadline == j && deadlineCounters[j] > 1)
-			{
-				struct task taskpoolDeadline[deadlineCounters[j]];
-				int m = 0;
-				
-				for(int n = j + 1; n < deadlineMax; n++)
-				{
-					m += deadlineCounters[n];
-				}
-
-				for(int n = deadlineCounters[j]; n > j; n--)
-				{
-					taskpoolDeadline[deadlineCounters[j] - n] = taskpool[taskpool_n - m - n];
-				}
-
-				prioritySort(taskpoolDeadline, deadlineCounters[j]);
-
-				for (int n = deadlineCounters[j]; n > j; n--)
-				{
-					taskpool[taskpool_n - m - n] = taskpoolDeadline[deadlineCounters[j] - n];
-				}
-			}
-		}
-	}*/
 }
 
-void policyFIFO(int start, int end)
+static void policyFIFO(int start, int end)
 {
 	int tasksLeft = end - start;
 
@@ -190,7 +156,7 @@ void policyFIFO(int start, int end)
 	}
 }
 
-void policyPriority(int start, int end)
+/*static void policyPriority(int start, int end)
 {
 	for(int i = start; i < end; i++)
 	{
@@ -207,6 +173,63 @@ void policyPriority(int start, int end)
 				taskpool[i].entry(taskpool[i].ctx);
 			}
 		}								
+	}
+}*/
+
+static void policyPriority(int start, int end)
+{
+	struct task tmp;
+	tmp.timer = -1;
+	tmp.ctx = (void*)-1;
+	struct task* taskWithTimer = &tmp;
+	int timerOff = 1;
+
+	int i = start;
+
+	while(i < end)
+	{
+		if(taskWithTimer->timer > 0 || timerOff == 1)
+		{
+			if(priorityCounters[10 - taskpool[i].priority] > 1)
+			{
+				policyFIFO(i, i + priorityCounters[10 - taskpool[i].priority]);
+
+				i += priorityCounters[10 - taskpool[i].priority];
+			}
+			else
+			{
+				while (*((int*)taskpool[i].ctx) >= 0) 
+				{
+					taskpool[i].entry(taskpool[i].ctx);
+
+					if(taskpool[i].timer > 0)
+					{
+						taskWithTimer = &taskpool[i];
+						timerOff = 0;
+						break;
+					}
+
+					if(taskWithTimer->timer == 0)
+					{
+						i -= 2;
+						break;
+					}
+				}
+
+				i++;
+			}	
+		}
+		else if(taskWithTimer->timer == 0 && *((int*)taskWithTimer[i].ctx) >= 0)
+		{
+			taskWithTimer->entry(taskWithTimer->ctx);
+
+			if(*((int*)taskWithTimer[i].ctx) == -1)
+			{
+				timerOff = 1;
+			}
+
+			i++;
+		}
 	}
 }
 

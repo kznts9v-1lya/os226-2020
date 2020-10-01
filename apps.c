@@ -95,8 +95,9 @@ static void coapp_task(void *_ctx) {
 
         printf("%16s id %d cnt %d\n", __func__, ctx - app_ctxs, ctx->cnt);
 
-        if (0 < ctx->cnt) {
-                sched_cont(coapp_task, ctx, 2);
+        if (0 < ctx->cnt) 
+		{
+        	sched_cont(coapp_task, ctx, 2);
         }
 
         --ctx->cnt;
@@ -109,8 +110,9 @@ static void coapp_rt(void *_ctx) {
 
         sched_time_elapsed(1);
 
-        if (0 < ctx->cnt) {
-                sched_cont(coapp_rt, ctx, 0);
+        if (0 < ctx->cnt) 
+		{
+            sched_cont(coapp_rt, ctx, 0);
         }
 
         --ctx->cnt;
