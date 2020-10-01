@@ -13,8 +13,6 @@ static struct task taskpool[16];
 static int taskpool_n;
 static enum policy currentPolicy;
 static int priorityCounters[11];
-static int deadlineMax;
-static int* deadlineCounters;
 
 void sched_new(void (*entrypoint)(void *aspace),
 		void *aspace,
@@ -26,15 +24,8 @@ void sched_new(void (*entrypoint)(void *aspace),
 	t->ctx = aspace;
 	t->priority = priority;
 	t->deadline = deadline <= 0? 0 : deadline;
-
-	if(deadline > deadlineMax)
-	{
-		deadlineMax = deadline;
-	}
-
 	t->id = taskpool_n;
 
-	priorityCounters[10 - priority]++;
 	taskpool_n++;
 }
 
@@ -54,7 +45,7 @@ void sched_set_policy(enum policy policy) {
 	currentPolicy = policy;
 }
 
-static deadlineCmp(const struct task* task1, const struct task* task2)
+static int deadlineCmp(const struct task* task1, const struct task* task2)
 {
 	return(task1->deadline - task2->deadline);
 }
@@ -76,7 +67,7 @@ static void IDSort(struct task* taskpoolArr)
 		if(priorityCounters[n] > 1)
 		{
 			struct task taskpoolID[priorityCounters[n]];
-			int m = 0; // Number of tasks before n
+			int m = 0;
 
 			for(int j = 0; j < n; j++)
 			{
@@ -100,7 +91,13 @@ static void IDSort(struct task* taskpoolArr)
 
 static void prioritySort(struct task* taskpoolArr, int size)
 {
+	for(int i = 0; i < size; i++)
+	{
+		priorityCounters[10 - taskpoolArr[i].priority]++;
+	}
+
 	qsort(taskpoolArr, size, sizeof(struct task), (int(*)(const void*, const void*)) priorityCmp);
+
 	IDSort(taskpoolArr);
 }
 
@@ -117,10 +114,59 @@ static void deadlineSort()
 			taskpool[i] = taskpool[i + 1];
 		}
 
-		taskpool[taskpool_n] = tmp;
+		taskpool[taskpool_n - 1] = tmp;
 	}
 
-	
+
+
+	/*deadlineCounters = (int*)calloc(deadlineMax, sizeof(int));
+
+	for(int i = 0; i < taskpool_n; i++)
+	{
+		deadlineCounters[taskpool[i].deadline]++;
+	}
+
+	for(int i = 0; i < taskpool_n; i++)
+	{
+		for(int j = 1; j < deadlineMax; j++)
+		{
+			if(taskpool[i].deadline == j && deadlineCounters[j] > 1)
+			{
+				struct task taskpoolDeadline[deadlineCounters[j]];
+			}
+
+
+		}
+	}*/
+
+	/*for(int i = 0; i < taskpool_n; i++)
+	{
+		for(int j = 0; j < deadlineMax; j++)
+		{
+			if(taskpool[i].deadline == j && deadlineCounters[j] > 1)
+			{
+				struct task taskpoolDeadline[deadlineCounters[j]];
+				int m = 0;
+				
+				for(int n = j + 1; n < deadlineMax; n++)
+				{
+					m += deadlineCounters[n];
+				}
+
+				for(int n = deadlineCounters[j]; n > j; n--)
+				{
+					taskpoolDeadline[deadlineCounters[j] - n] = taskpool[taskpool_n - m - n];
+				}
+
+				prioritySort(taskpoolDeadline, deadlineCounters[j]);
+
+				for (int n = deadlineCounters[j]; n > j; n--)
+				{
+					taskpool[taskpool_n - m - n] = taskpoolDeadline[deadlineCounters[j] - n];
+				}
+			}
+		}
+	}*/
 }
 
 void policyFIFO(int start, int end)
@@ -129,7 +175,7 @@ void policyFIFO(int start, int end)
 
 	while(tasksLeft != 0)
 	{
-		for(int i = start; i < end && i < taskpool_n; i++)
+		for(int i = start; i < end; i++)
 		{
 			if (*((int*)taskpool[i].ctx) >= 0)
 			{
@@ -141,6 +187,26 @@ void policyFIFO(int start, int end)
 				}
 			}		
 		}
+	}
+}
+
+void policyPriority(int start, int end)
+{
+	for(int i = start; i < end; i++)
+	{
+		if(priorityCounters[10 - taskpool[i].priority] > 1)
+		{
+			policyFIFO(i, i + priorityCounters[10 - taskpool[i].priority]);
+
+			i += (priorityCounters[10 - taskpool[i].priority] - 1);
+		}
+		else
+		{
+			while (*((int*)taskpool[i].ctx) >= 0) 
+			{
+				taskpool[i].entry(taskpool[i].ctx);
+			}
+		}								
 	}
 }
 
@@ -157,57 +223,50 @@ void sched_run(void)
 		case POLICY_PRIO:
 		{
 			prioritySort(taskpool, taskpool_n);
-			
-			for(int i = 0; i < taskpool_n; i++)
-			{
-				if(priorityCounters[10 - taskpool[i].priority] > 1)
-				{
-					policyFIFO(i, i + priorityCounters[10 - taskpool[i].priority]);
-
-					i += (priorityCounters[10 - taskpool[i].priority] - 1);
-				}
-				else
-				{
-					while (*((int*)taskpool[i].ctx) >= 0) 
-					{
-						taskpool[i].entry(taskpool[i].ctx);
-					}
-				}								
-			}
+			policyPriority(0, taskpool_n);
 
 			break;
 		}
 		case POLICY_DEADLINE:
 		{
-			deadlineCounters = (int*)calloc(deadlineMax, sizeof(int));
+			deadlineSort();
 
-			for(int i = 0; i < taskpool_n; i++)
-			{
-				deadlineCounters[taskpool[i].deadline]++;
-			}
-
-			for(int i = 0; i < taskpool_n; i++)
-			{
-				for(int j = 0; j < deadlineMax; j++)
-				{
-					if(taskpool[i].deadline == j)
-					{
-						struct task taskpoolDeadline[deadlineCounters[j]];
-
-						for(int m = 0; m < deadlineCounters[j]; m++)
-						{
-							taskpoolDeadline[m] = taskpool[i + m];
-						}
-
-						//prioritySort();
-					}
-				}
-			}
-
+			int taskTotal = taskpool_n;
 
 			while (taskpool_n != 0)
 			{
-				
+				for(int i = 0; i < taskTotal; i++)
+				{
+					if(taskpool_n == 0)
+					{
+						break;
+					}
+
+					int c = i;
+					int j = 0;
+
+					while(taskpool[c].deadline == taskpool[c + 1].deadline && c < taskTotal - 1)
+					{
+						j++;
+						c++;
+					}
+
+					j++;
+
+					if(j == 1)
+					{
+						policyFIFO(i, i + j);
+
+						taskpool_n--;
+					}
+					else
+					{
+						prioritySort(taskpool + i, j);
+						policyPriority(i, i + j);
+
+						taskpool_n -= j;
+					}
+				}
 			}
 
 			break;
