@@ -1,303 +1,379 @@
 #include "sched.h"
 #include <stdio.h>
+#include <stdlib.h>
 
-struct task {
+struct task
+{
 	void (*entry)(void *ctx);
 	void *ctx;
+	int id;
 	int priority;
 	int deadline;
-	int id;
-	int timer;
+	int time;
+
+	struct task* next_run;
+	struct task* next_wait;
 };
 
 static struct task taskpool[16];
 static int taskpool_n;
-static enum policy currentPolicy;
-static int priorityCounters[11];
+static int sched_time;
 
-void sched_new(void (*entrypoint)(void *aspace), void *aspace, int priority, int deadline) 
+static struct task* run_list;
+static struct task* wait_list;
+
+static int (*policy_cmp)(struct task* t1, struct task* t2);
+
+static int fifo_cmp(struct task* t1, struct task* t2) 
+{
+	return t1->id - t2->id;
+}
+
+static int priority_cmp(struct task* t1, struct task* t2)
+{
+	int delta = t2->priority - t1->priority;
+
+	if (delta) 
+	{
+		return delta;
+	}
+
+	return fifo_cmp(t1, t2);
+}
+
+static int deadline_cmp(struct task* t1, struct task* t2) 
+{
+	int delta = t1->deadline - t2->deadline;
+
+	if (delta)
+	{
+		return delta;
+	}
+
+	return priority_cmp(t1, t2);
+}
+
+void sched_new(void (*entrypoint)(void *aspace),
+		void *aspace,
+		int priority,
+		int deadline) 
 {
 	struct task *t = &taskpool[taskpool_n];
-	
 	t->entry = entrypoint;
 	t->ctx = aspace;
-	t->priority = priority;
-	t->deadline = deadline <= 0? 0 : deadline;
 	t->id = taskpool_n;
-	t->timer = 0;
+	t->priority = priority;
+	t->deadline = deadline > 0 ? deadline : 0;
+	t->time = 0;
 
 	taskpool_n++;
 }
 
-void sched_cont(void (*entrypoint)(void *aspace), void *aspace, int timeout)
+static void any_insert(struct task* tmp, struct task* task)
 {
-	for (int i = 0; i < taskpool_n; i++) 
+	if(policy_cmp == deadline_cmp && (tmp->deadline == 0 || task->deadline == 0))
 	{
-		if (taskpool[i].ctx == aspace) 
+		if(task->deadline == 0)
 		{
-			taskpool[i].timer = timeout;
-			break;
+			struct task* tmp2 = run_list;
+
+			while(tmp2)
+			{
+				if(!tmp2->next_run)
+				{
+					break;
+				}
+
+				tmp2 = tmp2->next_run;
+			}
+
+			tmp2->next_run = task;
+			task->next_run = NULL;
+		}
+		else if(tmp->deadline == 0)
+		{
+			task->next_run = tmp;
+			run_list = task;
 		}
 	}
-}
-
-void sched_time_elapsed(int amount) 
-{
-	for(int i = 0; i < taskpool_n; i++)
+	else
 	{
-		if(taskpool[i].timer > 0)
+		while(tmp && policy_cmp(tmp, task) < 0)
 		{
-			taskpool[i].timer -= amount;
-
-			if (taskpool[i].timer < 0) 
+			if(!tmp->next_run)
 			{
-				printf("Undefined behavior.");
-			}
-		}
-		
-	}
-}
-
-void sched_set_policy(enum policy policy) {
-	currentPolicy = policy;
-}
-
-static int deadlineCmp(const struct task* task1, const struct task* task2)
-{
-	return(task1->deadline - task2->deadline);
-}
-
-static int priorityCmp(const struct task* task1, const struct task* task2)
-{
-	return(task2->priority - task1->priority);
-}
-
-static int idCmp(const struct task* task1, const struct task* task2)
-{
-	return(task1->id - task2->id);
-}
-
-static void IDSort(struct task* taskpoolArr)
-{
-	for(int n = 0; n < 11; n++)
-	{
-		if(priorityCounters[n] > 1)
-		{
-			struct task taskpoolID[priorityCounters[n]];
-			int m = 0;
-
-			for(int j = 0; j < n; j++)
-			{
-				m += priorityCounters[j];
+				break;
 			}
 
-			for(int i = 0; i < priorityCounters[n]; i++)
-			{
-				taskpoolID[i] = taskpoolArr[m + i];
-			}
-
-			qsort(taskpoolID, priorityCounters[n], sizeof(struct task), (int(*)(const void*, const void*)) idCmp);
-
-			for(int i = 0; i < priorityCounters[n]; i++)
-			{
-				taskpoolArr[m + i] = taskpoolID[i];
-			}
+			tmp = tmp->next_run;
 		}
 	}
-}
-
-static void prioritySort(struct task* taskpoolArr, int size)
-{
-	for(int i = 0; i < size; i++)
-	{
-		priorityCounters[10 - taskpoolArr[i].priority]++;
-	}
-
-	qsort(taskpoolArr, size, sizeof(struct task), (int(*)(const void*, const void*)) priorityCmp);
-
-	IDSort(taskpoolArr);
-}
-
-static void deadlineSort()
-{
-	qsort(taskpool, taskpool_n, sizeof(struct task), (int(*)(const void*, const void*)) deadlineCmp);
 	
-	while(taskpool[0].deadline == 0)
+	struct task* tmp2 = run_list;
+
+	if(tmp2 != tmp)
 	{
-		struct task tmp = taskpool[0];
-		
-		for(int i = 0; i < taskpool_n - 1; i++)
+		while(tmp2->next_run)
 		{
-			taskpool[i] = taskpool[i + 1];
+			if(tmp2->next_run == tmp)
+			{
+				break;
+			}
+
+			tmp2 = tmp2->next_run;
 		}
 
-		taskpool[taskpool_n - 1] = tmp;
+		tmp2->next_run = task;
+		task->next_run = tmp;
+	}
+	else
+	{
+		if(policy_cmp == fifo_cmp)
+		{
+			struct task* tmp3 = tmp2->next_run;
+
+			tmp2->next_run = task;
+			task->next_run = tmp3;
+		}
+		else if(policy_cmp == priority_cmp)
+		{
+			if(task->priority > tmp->priority)
+			{
+				task->next_run = tmp;
+				run_list = task;
+			}
+			else if(task->priority < tmp->priority)
+			{
+				tmp->next_run = task;
+				task->next_run = NULL;
+			}
+		}
+	}	
+}
+
+static void priority_insert(struct task* tmp, struct task* task)
+{
+	if(tmp->priority - task->priority == 0)
+	{
+		policy_cmp = fifo_cmp;
+		any_insert(tmp, task);
+	}
+	else
+	{
+		any_insert(tmp, task);
 	}
 }
 
-static void policyFIFO(int start, int end)
+static void deadline_insert(struct task* tmp, struct task* task)
 {
-	int tasksLeft = end - start;
-
-	while(tasksLeft != 0)
+	if(tmp->deadline - task->deadline == 0)
 	{
-		for(int i = start; i < end; i++)
-		{
-			if (*((int*)taskpool[i].ctx) >= 0)
-			{
-				taskpool[i].entry(taskpool[i].ctx);
+		policy_cmp = priority_cmp;
+		priority_insert(tmp, task);
+	}			
+	else
+	{
+		any_insert(tmp, task);
+	}
+}
 
-				if(*((int*)taskpool[i].ctx) == -1)
+static void insert_run_list(struct task* task)
+{
+	if(run_list)
+	{
+		struct task* tmp = run_list;
+
+		if(policy_cmp == fifo_cmp)
+		{
+			any_insert(tmp, task);
+		}
+		else if(policy_cmp == priority_cmp)
+		{
+			priority_insert(tmp, task);
+		}
+		else if(policy_cmp == deadline_cmp)
+		{
+			deadline_insert(tmp, task);
+		}
+	}
+	else
+	{
+		run_list = task;
+	}
+	
+}
+
+void sched_cont(void (*entrypoint)(void *aspace),
+		void *aspace,
+		int timeout)
+{
+	if(timeout > 0)
+	{
+		for(int i = 0; i < taskpool_n; i++)
+		{
+			if(taskpool[i].ctx == aspace)
+			{
+				taskpool[i].time = sched_time + timeout;
+
+				if(!wait_list)
 				{
-					tasksLeft--;
+					wait_list = &taskpool[i];
+					wait_list->next_run = NULL;
 				}
-			}		
+				else
+				{
+					struct task* tmp = &taskpool[i];
+					tmp->next_run = NULL;
+					struct task* tmp2 = wait_list;
+
+					while(1)
+					{
+						if(!tmp2->next_wait)
+						{
+							break;
+						}
+
+						tmp2 = tmp2->next_wait;
+					}
+
+					tmp2->next_wait = tmp;
+				}
+
+				break;
+			}
+		}
+	}
+	else
+	{
+		for(int i = 0; i < taskpool_n; i++)
+		{
+			if(taskpool[i].ctx == aspace)
+			{
+				insert_run_list(&taskpool[i]);
+
+				break;
+			}
 		}
 	}
 }
 
-/*static void policyPriority(int start, int end)
+void sched_time_elapsed(unsigned amount) 
 {
-	for(int i = start; i < end; i++)
+	sched_time += (int)amount;
+
+	struct task* tmp = wait_list;
+
+	if(wait_list)
 	{
-		if(priorityCounters[10 - taskpool[i].priority] > 1)
+		while(1)
 		{
-			policyFIFO(i, i + priorityCounters[10 - taskpool[i].priority]);
-
-			i += (priorityCounters[10 - taskpool[i].priority] - 1);
-		}
-		else
-		{
-			while (*((int*)taskpool[i].ctx) >= 0) 
+			if(tmp->time <= sched_time)
 			{
-				taskpool[i].entry(taskpool[i].ctx);
-			}
-		}								
-	}
-}*/
+				insert_run_list(tmp);
 
-static void policyPriority(int start, int end)
-{
-	struct task tmp;
-	tmp.timer = -1;
-	tmp.ctx = (void*)-1;
-	struct task* taskWithTimer = &tmp;
-	int timerOff = 1;
+				struct task* tmp2 = wait_list;
 
-	int i = start;
-
-	while(i < end)
-	{
-		if(taskWithTimer->timer > 0 || timerOff == 1)
-		{
-			if(priorityCounters[10 - taskpool[i].priority] > 1)
-			{
-				policyFIFO(i, i + priorityCounters[10 - taskpool[i].priority]);
-
-				i += priorityCounters[10 - taskpool[i].priority];
-			}
-			else
-			{
-				while (*((int*)taskpool[i].ctx) >= 0) 
+				while(tmp2->next_wait)
 				{
-					taskpool[i].entry(taskpool[i].ctx);
-
-					if(taskpool[i].timer > 0)
+					if(tmp2->next_wait == tmp)
 					{
-						taskWithTimer = &taskpool[i];
-						timerOff = 0;
 						break;
 					}
 
-					if(taskWithTimer->timer == 0)
-					{
-						i -= 2;
-						break;
-					}
+					tmp2 = tmp2->next_wait;
 				}
 
-				i++;
-			}	
-		}
-		else if(taskWithTimer->timer == 0 && *((int*)taskWithTimer[i].ctx) >= 0)
-		{
-			taskWithTimer->entry(taskWithTimer->ctx);
-
-			if(*((int*)taskWithTimer[i].ctx) == -1)
-			{
-				timerOff = 1;
+				if(tmp2 == tmp)
+				{
+					wait_list = NULL;
+				}
+				else
+				{
+					tmp2->next_wait = tmp->next_wait;
+				}
 			}
 
-			i++;
+			if(!tmp->next_wait)
+			{
+				break;
+			}
+
+			tmp = tmp->next_wait;
 		}
 	}
 }
 
-void sched_run(void) 
+void sched_set_policy(enum policy policy)
 {
-	switch (currentPolicy)
+	switch (policy)
 	{
 		case POLICY_FIFO:
 		{
-			policyFIFO(0, taskpool_n);
+			policy_cmp = fifo_cmp;
 
 			break;
 		}
 		case POLICY_PRIO:
 		{
-			prioritySort(taskpool, taskpool_n);
-			policyPriority(0, taskpool_n);
+			policy_cmp = priority_cmp;
 
 			break;
 		}
 		case POLICY_DEADLINE:
 		{
-			deadlineSort();
-
-			int taskTotal = taskpool_n;
-
-			while (taskpool_n != 0)
-			{
-				for(int i = 0; i < taskTotal; i++)
-				{
-					if(taskpool_n == 0)
-					{
-						break;
-					}
-
-					int c = i;
-					int j = 0;
-
-					while(taskpool[c].deadline == taskpool[c + 1].deadline && c < taskTotal - 1)
-					{
-						j++;
-						c++;
-					}
-
-					j++;
-
-					if(j == 1)
-					{
-						policyFIFO(i, i + j);
-
-						taskpool_n--;
-					}
-					else
-					{
-						prioritySort(taskpool + i, j);
-						policyPriority(i, i + j);
-
-						taskpool_n -= j;
-					}
-				}
-			}
+			policy_cmp = deadline_cmp;
 
 			break;
 		}
 		default:
 		{
-			printf("Non-existent policy selected.");
+			printf("Incorrect policy.");
+
 			break;
 		}
+	}
+}
+
+static void policy_sort()
+{
+	qsort(taskpool, taskpool_n, sizeof(struct task), policy_cmp);
+
+	if(policy_cmp == deadline_cmp)
+	{
+		while(taskpool[0].deadline == 0)
+		{
+			struct task tmp = taskpool[0];
+
+			for(int i = 0; i < taskpool_n - 1; i++)
+			{
+				taskpool[i] = taskpool[i + 1];
+			}
+
+			taskpool[taskpool_n - 1] = tmp;
+		}
+	}
+}
+
+static void make_run_list()
+{
+	for(int i = 0; i < taskpool_n - 1; i++)
+	{
+		taskpool[i].next_run = &taskpool[i + 1];
+	}
+
+	run_list = &taskpool[0];
+}
+
+void sched_run(void) 
+{
+	policy_sort();
+	make_run_list();
+
+	while(run_list)
+	{
+		struct task* run_list_head = run_list;
+
+		run_list = run_list->next_run;
+		run_list_head->entry(run_list_head->ctx);
 	}
 }

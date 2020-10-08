@@ -29,8 +29,7 @@ extern void sched_cont(void (*entrypoint)(void *aspace), // entrypoint function
 		int timeout); // when the continuation became runnable
 
 // Notify scheduler that some amount of time passed
-extern void sched_time_elapsed(int amount);
+extern void sched_time_elapsed(unsigned amount);
 
 // Scheduler loop, start executing tasks until all of them finish
 extern void sched_run(void);
-
