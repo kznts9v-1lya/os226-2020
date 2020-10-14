@@ -1,379 +1,147 @@
-#include "sched.h"
+#define _GNU_SOURCE
+
+#include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
+#include <unistd.h>
 
-struct task
-{
-	void (*entry)(void *ctx);
-	void *ctx;
-	int id;
+#include "timer.h"
+#include "sched.h"
+#include "ctx.h"
+
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof(*a))
+
+/* AMD64 Sys V ABI, 3.2.2 The Stack Frame:
+The 128-byte area beyond the location pointed to by %rsp is considered to
+be reserved and shall not be modified by signal or interrupt handlers */
+#define SYSV_REDST_SZ 128
+
+extern void tramptramp(void);
+
+static void bottom(void);
+
+struct task {
+	void (*entry)(void *as);
+	void *as;
 	int priority;
-	int deadline;
-	int time;
 
-	struct task* next_run;
-	struct task* next_wait;
+	struct ctx ctx;
+	char stack[8192];
+
+	// timeout support
+	int waketime;
+
+	// policy support
+	struct task *next;
 };
 
+static volatile int time;
+static int tick_period;
+
+static struct task *current;
+static int current_start;
+static struct task *runq;
+static struct task *waitq;
+
+static struct task idle;
 static struct task taskpool[16];
 static int taskpool_n;
-static int sched_time;
 
-static struct task* run_list;
-static struct task* wait_list;
+static sigset_t irqs;
 
-static int (*policy_cmp)(struct task* t1, struct task* t2);
-
-static int fifo_cmp(struct task* t1, struct task* t2) 
-{
-	return t1->id - t2->id;
+static void irq_disable(void) {
+	sigprocmask(SIG_BLOCK, &irqs, NULL);
 }
 
-static int priority_cmp(struct task* t1, struct task* t2)
-{
-	int delta = t2->priority - t1->priority;
-
-	if (delta) 
-	{
-		return delta;
-	}
-
-	return fifo_cmp(t1, t2);
+static void irq_enable(void) {
+	sigprocmask(SIG_UNBLOCK, &irqs, NULL);
 }
 
-static int deadline_cmp(struct task* t1, struct task* t2) 
-{
-	int delta = t1->deadline - t2->deadline;
+static int prio_cmp(struct task *t1, struct task *t2) {
+	return t1->priority - t2->priority;
+}
 
-	if (delta)
-	{
-		return delta;
+static void policy_run(struct task *t) {
+	struct task **c = &runq;
+
+	while (*c && prio_cmp(*c, t) <= 0) {
+		c = &(*c)->next;
 	}
+	t->next = *c;
+	*c = t;
+}
 
-	return priority_cmp(t1, t2);
+static void hctx_push(greg_t *regs, unsigned long val) {
+	regs[REG_RSP] -= sizeof(unsigned long);
+	*(unsigned long *) regs[REG_RSP] = val;
+}
+
+static void top(int sig, siginfo_t *info, void *ctx) {
+	ucontext_t *uc = (ucontext_t *) ctx;
+	greg_t *regs = uc->uc_mcontext.gregs;
+
+	unsigned long oldsp = regs[REG_RSP];
+	regs[REG_RSP] -= SYSV_REDST_SZ;
+	hctx_push(regs, regs[REG_RIP]);
+	hctx_push(regs, sig);
+	hctx_push(regs, regs[REG_RBP]);
+	hctx_push(regs, oldsp);
+	hctx_push(regs, (unsigned long) bottom);
+	regs[REG_RIP] = (greg_t) tramptramp;
+}
+
+int sched_gettime(void) {
+	int cnt1 = timer_cnt();
+	int time1 = time;
+	int cnt2 = timer_cnt();
+	int time2 = time;
+
+	return (cnt1 <= cnt2) ?
+		time1 + cnt2 :
+		time2 + cnt2;
+}
+
+// FIXME below this line
+
+static void tasktramp(void) {
 }
 
 void sched_new(void (*entrypoint)(void *aspace),
 		void *aspace,
-		int priority,
-		int deadline) 
-{
-	struct task *t = &taskpool[taskpool_n];
+		int priority) {
+
+	if (ARRAY_SIZE(taskpool) <= taskpool_n) {
+		fprintf(stderr, "No mem for new task\n");
+		return;
+	}
+	struct task *t = &taskpool[taskpool_n++];
+
 	t->entry = entrypoint;
-	t->ctx = aspace;
-	t->id = taskpool_n;
+	t->as = aspace;
 	t->priority = priority;
-	t->deadline = deadline > 0 ? deadline : 0;
-	t->time = 0;
 
-	taskpool_n++;
+	ctx_make(&t->ctx, tasktramp, t->stack, sizeof(t->stack));
 }
 
-static void any_insert(struct task* tmp, struct task* task)
-{
-	if(policy_cmp == deadline_cmp && (tmp->deadline == 0 || task->deadline == 0))
-	{
-		if(task->deadline == 0)
-		{
-			struct task* tmp2 = run_list;
-
-			while(tmp2)
-			{
-				if(!tmp2->next_run)
-				{
-					break;
-				}
-
-				tmp2 = tmp2->next_run;
-			}
-
-			tmp2->next_run = task;
-			task->next_run = NULL;
-		}
-		else if(tmp->deadline == 0)
-		{
-			task->next_run = tmp;
-			run_list = task;
-		}
-	}
-	else
-	{
-		while(tmp && policy_cmp(tmp, task) < 0)
-		{
-			if(!tmp->next_run)
-			{
-				break;
-			}
-
-			tmp = tmp->next_run;
-		}
-	}
-	
-	struct task* tmp2 = run_list;
-
-	if(tmp2 != tmp)
-	{
-		while(tmp2->next_run)
-		{
-			if(tmp2->next_run == tmp)
-			{
-				break;
-			}
-
-			tmp2 = tmp2->next_run;
-		}
-
-		tmp2->next_run = task;
-		task->next_run = tmp;
-	}
-	else
-	{
-		if(policy_cmp == fifo_cmp)
-		{
-			struct task* tmp3 = tmp2->next_run;
-
-			tmp2->next_run = task;
-			task->next_run = tmp3;
-		}
-		else if(policy_cmp == priority_cmp)
-		{
-			if(task->priority > tmp->priority)
-			{
-				task->next_run = tmp;
-				run_list = task;
-			}
-			else if(task->priority < tmp->priority)
-			{
-				tmp->next_run = task;
-				task->next_run = NULL;
-			}
-		}
-	}	
+static void bottom(void) {
+	time += tick_period;
 }
 
-static void priority_insert(struct task* tmp, struct task* task)
-{
-	if(tmp->priority - task->priority == 0)
-	{
-		policy_cmp = fifo_cmp;
-		any_insert(tmp, task);
-	}
-	else
-	{
-		any_insert(tmp, task);
-	}
+void sched_sleep(unsigned ms) {
 }
 
-static void deadline_insert(struct task* tmp, struct task* task)
-{
-	if(tmp->deadline - task->deadline == 0)
-	{
-		policy_cmp = priority_cmp;
-		priority_insert(tmp, task);
-	}			
-	else
-	{
-		any_insert(tmp, task);
-	}
-}
+void sched_run(int period_ms) {
+	sigemptyset(&irqs);
+	sigaddset(&irqs, SIGALRM);
 
-static void insert_run_list(struct task* task)
-{
-	if(run_list)
-	{
-		struct task* tmp = run_list;
+	tick_period = period_ms;
+	timer_init_period(period_ms, top);
 
-		if(policy_cmp == fifo_cmp)
-		{
-			any_insert(tmp, task);
-		}
-		else if(policy_cmp == priority_cmp)
-		{
-			priority_insert(tmp, task);
-		}
-		else if(policy_cmp == deadline_cmp)
-		{
-			deadline_insert(tmp, task);
-		}
-	}
-	else
-	{
-		run_list = task;
-	}
-	
-}
+	sigset_t none;
+	sigemptyset(&none);
 
-void sched_cont(void (*entrypoint)(void *aspace),
-		void *aspace,
-		int timeout)
-{
-	if(timeout > 0)
-	{
-		for(int i = 0; i < taskpool_n; i++)
-		{
-			if(taskpool[i].ctx == aspace)
-			{
-				taskpool[i].time = sched_time + timeout;
+	irq_disable();
 
-				if(!wait_list)
-				{
-					wait_list = &taskpool[i];
-					wait_list->next_run = NULL;
-				}
-				else
-				{
-					struct task* tmp = &taskpool[i];
-					tmp->next_run = NULL;
-					struct task* tmp2 = wait_list;
+	current = &idle;
 
-					while(1)
-					{
-						if(!tmp2->next_wait)
-						{
-							break;
-						}
-
-						tmp2 = tmp2->next_wait;
-					}
-
-					tmp2->next_wait = tmp;
-				}
-
-				break;
-			}
-		}
-	}
-	else
-	{
-		for(int i = 0; i < taskpool_n; i++)
-		{
-			if(taskpool[i].ctx == aspace)
-			{
-				insert_run_list(&taskpool[i]);
-
-				break;
-			}
-		}
-	}
-}
-
-void sched_time_elapsed(unsigned amount) 
-{
-	sched_time += (int)amount;
-
-	struct task* tmp = wait_list;
-
-	if(wait_list)
-	{
-		while(1)
-		{
-			if(tmp->time <= sched_time)
-			{
-				insert_run_list(tmp);
-
-				struct task* tmp2 = wait_list;
-
-				while(tmp2->next_wait)
-				{
-					if(tmp2->next_wait == tmp)
-					{
-						break;
-					}
-
-					tmp2 = tmp2->next_wait;
-				}
-
-				if(tmp2 == tmp)
-				{
-					wait_list = NULL;
-				}
-				else
-				{
-					tmp2->next_wait = tmp->next_wait;
-				}
-			}
-
-			if(!tmp->next_wait)
-			{
-				break;
-			}
-
-			tmp = tmp->next_wait;
-		}
-	}
-}
-
-void sched_set_policy(enum policy policy)
-{
-	switch (policy)
-	{
-		case POLICY_FIFO:
-		{
-			policy_cmp = fifo_cmp;
-
-			break;
-		}
-		case POLICY_PRIO:
-		{
-			policy_cmp = priority_cmp;
-
-			break;
-		}
-		case POLICY_DEADLINE:
-		{
-			policy_cmp = deadline_cmp;
-
-			break;
-		}
-		default:
-		{
-			printf("Incorrect policy.");
-
-			break;
-		}
-	}
-}
-
-static void policy_sort()
-{
-	qsort(taskpool, taskpool_n, sizeof(struct task), policy_cmp);
-
-	if(policy_cmp == deadline_cmp)
-	{
-		while(taskpool[0].deadline == 0)
-		{
-			struct task tmp = taskpool[0];
-
-			for(int i = 0; i < taskpool_n - 1; i++)
-			{
-				taskpool[i] = taskpool[i + 1];
-			}
-
-			taskpool[taskpool_n - 1] = tmp;
-		}
-	}
-}
-
-static void make_run_list()
-{
-	for(int i = 0; i < taskpool_n - 1; i++)
-	{
-		taskpool[i].next_run = &taskpool[i + 1];
-	}
-
-	run_list = &taskpool[0];
-}
-
-void sched_run(void) 
-{
-	policy_sort();
-	make_run_list();
-
-	while(run_list)
-	{
-		struct task* run_list_head = run_list;
-
-		run_list = run_list->next_run;
-		run_list_head->entry(run_list_head->ctx);
-	}
+	sigsuspend(&none);
 }
