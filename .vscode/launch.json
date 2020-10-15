@@ -9,7 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/main",
-            "args": [],
+            "args": ["#task id param\nburn 1 10\nburn 2 10\n"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],

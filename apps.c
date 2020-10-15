@@ -98,11 +98,13 @@ struct app_ctx {
 };
 struct app_ctx app_ctxs[16];
 
+static long refstart;
+
 static void print(struct app_ctx *ctx, const char *msg) {
-	static long refstart;
-	if (!refstart) {
+	//static long refstart;
+	/*if (!refstart) {
 		refstart = reftime();
-	}
+	}*/
         printf("app1 id %d %s time %d reference %ld\n", 
 		ctx - app_ctxs, msg, sched_gettime(), reftime() - refstart);
 	fflush(stdout);
@@ -178,6 +180,12 @@ static void shell(void *ctx) {
 	}
 }
 
-void init(void) {
+void init(void) 
+{
+	if (!refstart) 
+	{
+        refstart = reftime();
+	}
+
 	sched_new(shell, NULL, 0);
 }

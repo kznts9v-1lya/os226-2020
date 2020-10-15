@@ -10,4 +10,3 @@ void ctx_make(struct ctx *ctx, void *entry, void *stack, int stacksz) {
         ctx->rsp -= 8;
         *(unsigned long *)ctx->rsp = (unsigned long) entry;
 }
-
