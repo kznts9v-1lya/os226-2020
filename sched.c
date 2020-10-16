@@ -100,11 +100,24 @@ int sched_gettime(void) {
 		time2 + cnt2;
 }
 
+static void task_switch()
+{
+	struct task* previous = current;
+
+	current = runq;
+	runq = current->next;
+
+	current_start = sched_gettime();
+	ctx_switch(&previous->ctx, &current->ctx);
+}
+
 static void tasktramp(void) 
 {
 	irq_enable();
 
 	current->entry(current->as);
+
+	task_switch();
 }
 
 void sched_new(void (*entrypoint)(void *aspace),
@@ -126,17 +139,6 @@ void sched_new(void (*entrypoint)(void *aspace),
 	irq_disable();
 	policy_run(t);
 	irq_enable();
-}
-
-static void task_switch()
-{
-	struct task* previous = current;
-
-	current = runq;
-	runq = current->next;
-
-	current_start = sched_gettime();
-	ctx_switch(&previous->ctx, &current->ctx);
 }
 
 static void current_task_switch()
