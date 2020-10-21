@@ -1,3 +1,4 @@
+
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -99,15 +100,6 @@ struct app_ctx {
 struct app_ctx app_ctxs[16];
 
 static long refstart;
-<<<<<<< HEAD
-
-static void print(struct app_ctx *ctx, const char *msg) {
-	//static long refstart;
-	/*if (!refstart) {
-		refstart = reftime();
-	}*/
-        printf("app1 id %d %s time %d reference %ld\n", 
-=======
 static long reftime(void) {
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -115,7 +107,6 @@ static long reftime(void) {
 }
 static void print(struct app_ctx *ctx, const char *msg) {
 	printf("app1 id %d %s time %d reference %ld\n",
->>>>>>> f5489f8e9b1bcf5e8daa09b2456511accf413f8c
 		ctx - app_ctxs, msg, sched_gettime(), reftime() - refstart);
 	fflush(stdout);
 }
@@ -249,17 +240,7 @@ static void shell(void *ctx) {
 	}
 }
 
-<<<<<<< HEAD
-void init(void) 
-{
-	if (!refstart) 
-	{
-        refstart = reftime();
-	}
-
-=======
 void init(void) {
 	refstart = reftime();
->>>>>>> f5489f8e9b1bcf5e8daa09b2456511accf413f8c
 	sched_new(shell, NULL, 0);
 }
