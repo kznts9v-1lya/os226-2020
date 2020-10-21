@@ -177,18 +177,7 @@ static int app_load(int argc, char* argv[]) {
 		printf("ELF header mismatch\n");
 		return 1;
 	}
-
-	// https://linux.die.net/man/5/elf
-	//
-	// 
-	//   Elf64_Phdr -- find one with PT_LOAD, load it for execution
-	//   Find entry point (e_entry)
-	// 
-	// (we compile loadable apps such way they can be loaded at arbitrary
-	// address)
-
-	// TODO load the app into loaded_app and run it
-
+	
 	int loaded_size = 0x1000;
 
 	void *loaded_app = mmap(NULL, loaded_size,
