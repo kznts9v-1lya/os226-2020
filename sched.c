@@ -100,6 +100,7 @@ int sched_gettime(void) {
 		time2 + cnt2;
 }
 
+<<<<<<< HEAD
 static void task_switch()
 {
 	struct task* previous = current;
@@ -120,6 +121,22 @@ static void tasktramp(void)
 	irq_disable();
 
 	task_switch();
+=======
+static void doswitch(void) {
+	struct task *old = current;
+	current = runq;
+	runq = current->next;
+
+	current_start = sched_gettime();
+	ctx_switch(&old->ctx, &current->ctx);
+}
+
+static void tasktramp(void) {
+	irq_enable();
+	current->entry(current->as);
+	irq_disable();
+	doswitch();
+>>>>>>> f5489f8e9b1bcf5e8daa09b2456511accf413f8c
 }
 
 void sched_new(void (*entrypoint)(void *aspace),
@@ -141,6 +158,7 @@ void sched_new(void (*entrypoint)(void *aspace),
 	irq_disable();
 	policy_run(t);
 	irq_enable();
+<<<<<<< HEAD
 }
 
 static void current_task_switch()
@@ -151,12 +169,15 @@ static void current_task_switch()
 	task_switch();
 
 	irq_enable();
+=======
+>>>>>>> f5489f8e9b1bcf5e8daa09b2456511accf413f8c
 }
 
 static void bottom(void) 
 {
 	time += tick_period;
 
+<<<<<<< HEAD
 	while(waitq && waitq->waketime <= sched_gettime())
 	{
 		struct task* task = waitq;
@@ -199,6 +220,47 @@ void sched_sleep(unsigned ms)
 
 		task_switch();
 
+=======
+	while (waitq && waitq->waketime <= sched_gettime()) {
+		struct task *t = waitq;
+		waitq = waitq->next;
+		policy_run(t);
+	}
+
+	if (tick_period <= sched_gettime() - current_start) {
+		irq_disable();
+		policy_run(current);
+		doswitch();
+		irq_enable();
+	}
+}
+
+void sched_sleep(unsigned ms) {
+
+#if 0
+	if (!ms) {
+		irq_disable();
+		policy_run(current);
+		doswitch();
+		irq_enable();
+		return;
+	}
+#endif
+
+	current->waketime = sched_gettime() + ms;
+
+	int curtime;
+	while ((curtime = sched_gettime()) < current->waketime) {
+		irq_disable();
+		struct task **c = &waitq;
+		while (*c && (*c)->waketime < current->waketime) {
+			c = &(*c)->next;
+		}
+		current->next = *c;
+		*c = current;
+
+		doswitch();
+>>>>>>> f5489f8e9b1bcf5e8daa09b2456511accf413f8c
 		irq_enable();
 	}
 }
@@ -216,6 +278,7 @@ void sched_run(int period_ms) {
 	irq_disable();
 	current = &idle;
 
+<<<<<<< HEAD
 	while(runq || waitq)
 	{
 		if(runq)
@@ -225,9 +288,20 @@ void sched_run(int period_ms) {
 		}
 		else
 		{
+=======
+	while (runq || waitq) {
+		if (runq) {
+			policy_run(current);
+			doswitch();
+		} else {
+>>>>>>> f5489f8e9b1bcf5e8daa09b2456511accf413f8c
 			sigsuspend(&none);
 		}
 	}
 
 	irq_enable();
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> f5489f8e9b1bcf5e8daa09b2456511accf413f8c
