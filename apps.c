@@ -180,7 +180,7 @@ static int app_load(int argc, char* argv[]) {
 
 	// https://linux.die.net/man/5/elf
 	//
-	// Find Elf64_Ehdr -- at the very start
+	// 
 	//   Elf64_Phdr -- find one with PT_LOAD, load it for execution
 	//   Find entry point (e_entry)
 	// 
@@ -198,12 +198,35 @@ static int app_load(int argc, char* argv[]) {
 		perror("mmap loaded_app");
 	}
 
+	Elf64_Ehdr* ehdr = rawelf;
+	Elf64_Phdr* phdr = rawelf + ehdr->e_phoff;
+	Elf64_Addr p_vaddr;
+	
+	/* Find one Elf64_Phdr with PT_LOAD, load it for execution */
+	for(Elf64_Phdr* p = phdr; p < phdr + ehdr->e_phnum; p++)
+	{
+		if(p->p_type == PT_LOAD)
+		{
+			memcpy(loaded_app, rawelf + p->p_offset, p->p_filesz);
+			p_vaddr = p->p_vaddr;
+
+			break;
+		}
+	}
+
+	/* Find entry point (e_entry) */
+	Elf64_Addr offset = ehdr->e_entry - p_vaddr;
+	int (*app) (int, char*[]) = (int (*) (int, char*[]))(loaded_app + offset);
+
+	/* Execute */
+	g_retcode = app(argc - 1, argv + 1);
+
 	if (0 != munmap(loaded_app, loaded_size)) {
 		perror("munmap");
 		return 1;
 	}
 
-	return 1;
+	return g_retcode;
 }
 
 static void shell(void *ctx) {
