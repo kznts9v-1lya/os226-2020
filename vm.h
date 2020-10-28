@@ -13,3 +13,11 @@ int vmbrk(void *addr);
 int vmprotect(void *start, unsigned len, int prot);
 
 int vminit(unsigned size);
+
+int get_fd();
+
+struct vmem_region
+{
+    off_t start;
+    off_t end;
+};
