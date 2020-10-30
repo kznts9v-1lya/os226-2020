@@ -119,7 +119,7 @@ static void doswitch(void)
 	if(current->vmem != NULL)
 	{
 		mmap(USERSPACE_START, current->vmem->end - current->vmem->start + 1, 
-			PROT_READ | PROT_WRITE,
+			PROT_READ | PROT_WRITE | PROT_EXEC,
 			MAP_FIXED | MAP_SHARED,
 			get_fd(), current->vmem->start);
 	}
