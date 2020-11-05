@@ -1,6 +1,7 @@
-#include "vm.h"
-
 #pragma once
+
+#include "ctx.h"
+#include "vm.h"
 
 enum policy {
 	// first-in, first-out; run tasks in order of their arrival
@@ -33,8 +34,3 @@ extern void sched_cont(void (*entrypoint)(void *aspace), // entrypoint function
 extern void sched_sleep(unsigned amount);
 
 extern int sched_gettime(void);
-
-// Scheduler loop, start executing tasks until all of them finish
-extern void sched_run(int period_ms);
-
-extern void vmem_set(struct vmem_region* cur_region);
