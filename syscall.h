@@ -2,10 +2,11 @@
 
 typedef int (*fn)(int, char *[]);
 
-#define SYSCALL_X(x)                         \
-	x(print, int, 2, char *, argv, int, len) \
-		x(fork, int, 0)                      \
-			x(exec, int, 4, const char *, path, char *const *, argv, int, argc, fn, func)
+#define SYSCALL_X(x)                                                            \
+	x(print, int, 2, char *, argv, int, len)                                    \
+		x(fork, int, 0)                                                         \
+			x(exec, int, 4, const char *, path, char *const *, argv, int, argc, \
+			  fn, func)
 
 #define SC_NR(name, ...) os_syscall_nr_##name,
 enum syscalls_num
@@ -30,7 +31,7 @@ static inline long os_syscall(int syscall,
 		  "S"(arg4),	// rsi
 		  "D"(rest)		// rdi
 		:);
-	return ret;
+	return ret; // It's a parent
 }
 
 #define DEFINE0(ret, name)                                                   \
@@ -43,10 +44,11 @@ static inline long os_syscall(int syscall,
 	{                                                                                           \
 		return (ret)os_syscall(os_syscall_nr_##name, (unsigned long)name1, 0, 0, 0, (void *)0); \
 	}
-#define DEFINE2(ret, name, type1, name1, type2, name2)                                                             \
-	static inline ret os_##name(type1 name1, type2 name2)                                                          \
-	{                                                                                                              \
-		return (ret)os_syscall(os_syscall_nr_##name, (unsigned long)name1, (unsigned long)name2, 0, 0, (void *)0); \
+#define DEFINE2(ret, name, type1, name1, type2, name2)                                           \
+	static inline ret os_##name(type1 name1, type2 name2)                                        \
+	{                                                                                            \
+		return (ret)os_syscall(os_syscall_nr_##name, (unsigned long)name1, (unsigned long)name2, \
+							   0, 0, (void *)0);                                                 \
 	}
 #define DEFINE3(ret, name, type1, name1, type2, name2, type3, name3)                             \
 	static inline ret os_##name(type1 name1, type2 name2, type3 name3)                           \

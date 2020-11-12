@@ -60,24 +60,23 @@ static int exec(int argc, char *argv[])
 		}
 	}
 
-	if (app->fn == app_exec)
+	if (app->fn == app_exec) // Don't use app_exec, because we should preempt shell
 	{
-		return app->fn(argc, argv);
+		return app->fn(argc, argv); // schell -> app
 	}
 
-	if (os_fork())
+	if (os_fork()) // 0 for childs, > 0 for parents
 	{
-		return 0;
+		return 0; // parents back to shell
 	}
 
 	if (app)
 	{
-		g_retcode = os_exec(argv[0], argv, argc, app->fn);
-		return 0;
+		return (g_retcode = os_exec(argv[0], argv, argc, app->fn)); // Need to duscuss g_retcode value
 	}
 	else
 	{
-		os_exec(argv[0], argv, argc, NULL);
+		return (g_retcode = os_exec(argv[0], argv, argc, NULL));
 	}
 
 	printf("Unknown command\n");
