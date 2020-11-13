@@ -176,11 +176,9 @@ int sys_exec(struct hctx *hctx, const char *path, char *const argv[], int argc, 
 	if (func)
 	{
 		irq_enable();
-
 		unsigned long result = func(argc, argv);
-		doswitch();
-
 		irq_disable();
+		doswitch();
 
 		hctx->rax = result;
 

@@ -62,17 +62,19 @@ static int exec(int argc, char *argv[])
 
 	if (app->fn == app_exec) // Don't use app_exec, because we should preempt shell
 	{
-		return app->fn(argc, argv); // schell -> app
+		return (g_retcode = app->fn(argc, argv)); // schell -> app
 	}
 
-	if (os_fork()) // 0 for childs, > 0 for parents
+	//TODO: Get childs PID. Parent kills childs. Get childs return code.
+
+	if (os_fork()) // 0 for childs, > 0 for parents.
 	{
 		return 0; // parents back to shell
 	}
 
 	if (app)
 	{
-		return (g_retcode = os_exec(argv[0], argv, argc, app->fn)); // Need to duscuss g_retcode value
+		return (g_retcode = os_exec(argv[0], argv, argc, app->fn));
 	}
 	else
 	{
