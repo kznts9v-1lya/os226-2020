@@ -33,6 +33,10 @@ struct task
 {
 	char stack[8192];
 
+	struct task *parent;
+	int exited;
+	int code;
+
 	struct vmctx vmctx;
 	union
 	{
@@ -295,6 +299,9 @@ static void forktramp(void)
 int sys_fork(struct hctx *hctx)
 {
 	struct task *t = &taskpool[taskpool_n++];
+
+	t->parent = current;
+
 	hctx->rax = 0;
 	vmctx_copy(&t->vmctx, &current->vmctx);
 	ctx_make(&t->ctx, forktramp, t->stack + sizeof(t->stack) - 16);
@@ -305,11 +312,32 @@ int sys_fork(struct hctx *hctx)
 
 int sys_waitpid(struct hctx *hctx, int pid, int *codeptr)
 {
-	return 1;
+	irq_disable();
+
+	struct task *t = &taskpool[pid];
+
+	while (!t->exited)
+	{
+		doswitch();
+	}
+
+	*codeptr = t->code;
+
+	irq_enable();
+
+	return *codeptr;
 }
 
 int sys_exit(struct hctx *hctx, int code)
 {
+	current->code = code;
+	current->exited = 1;
+
+	irq_disable();
+	policy_run(current->parent);
+
+	doswitch();
+
 	return 1;
 }
 
