@@ -170,9 +170,7 @@ static void doswitch(void)
 static void exectramp(void)
 {
 	irq_enable();
-	current->main(current->argc, current->argv);
-	irq_disable();
-	doswitch();
+	sys_exit((struct hctx *)current->ctx.rbx, current->main(current->argc, current->argv));
 }
 
 int sys_exec(struct hctx *hctx, const char *path, char *const argv[])
@@ -312,7 +310,7 @@ int sys_fork(struct hctx *hctx)
 
 int sys_waitpid(struct hctx *hctx, int pid, int *codeptr)
 {
-	irq_disable();
+	irq_enable();
 
 	struct task *t = &taskpool[pid];
 
@@ -323,7 +321,7 @@ int sys_waitpid(struct hctx *hctx, int pid, int *codeptr)
 
 	*codeptr = t->code;
 
-	irq_enable();
+	irq_disable();
 
 	return *codeptr;
 }
@@ -334,6 +332,7 @@ int sys_exit(struct hctx *hctx, int code)
 	current->exited = 1;
 
 	irq_disable();
+
 	policy_run(current->parent);
 
 	doswitch();
