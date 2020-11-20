@@ -124,7 +124,7 @@ static void hctx_call(greg_t *regs, void (*bottom)(struct hctx *))
 	*--savearea = regs[REG_RAX];
 
 	regs[REG_RBX] = regs[REG_RDI] = (unsigned long)savearea;
-	regs[REG_RSP] = (unsigned long)current->stack + sizeof(current->stack) - 16; // Why stack on kernel?
+	regs[REG_RSP] = (unsigned long)current->stack + sizeof(current->stack) - 16;
 	*(unsigned long *)(regs[REG_RSP] -= sizeof(unsigned long)) = (unsigned long)exittramp;
 	regs[REG_RIP] = (unsigned long)bottom;
 }
@@ -307,7 +307,7 @@ static void forktramp(void)
 int sys_fork(struct hctx *hctx)
 {
 	struct task *t = &taskpool[taskpool_n++];
-	hctx->rax = 0; // It's a child
+	hctx->rax = 0;
 	vmctx_copy(&t->vmctx, &current->vmctx);
 	ctx_make(&t->ctx, forktramp, t->stack + sizeof(t->stack) - 16);
 	t->ctx.rbx = (unsigned long)hctx;
