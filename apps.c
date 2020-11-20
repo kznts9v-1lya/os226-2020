@@ -65,7 +65,7 @@ static int exec(int argc, char *argv[])
 		return (g_retcode = app->fn(argc, argv)); // schell -> app
 	}
 
-	//TODO: Get childs PID. Parent kills childs. Get childs return code.
+	//Get childs PID. Parent kills childs. Get childs return code.
 
 	if (os_fork()) // 0 for childs, > 0 for parents.
 	{
