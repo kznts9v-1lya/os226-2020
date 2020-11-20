@@ -99,6 +99,7 @@ static int app_echo(int argc, char *argv[]) {
 static int app_retcode(int argc, char *argv[])
 {
 	printf("%d\n", g_retcode);
+	fflush(stdout);
 	return 0;
 }
 

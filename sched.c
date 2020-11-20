@@ -310,7 +310,6 @@ int sys_fork(struct hctx *hctx)
 
 int sys_waitpid(struct hctx *hctx, int pid, int *codeptr)
 {
-	// Need to discuss timer behaviour in different case
 	irq_disable();
 
 	struct task *t = &taskpool[pid];
