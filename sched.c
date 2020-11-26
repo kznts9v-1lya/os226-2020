@@ -290,6 +290,7 @@ int sys_exec(struct hctx *hctx, const char *path, char *const argv[])
 
 static void forktramp(void)
 {
+	irq_enable();
 	vmapplymap(&current->vmctx);
 	exittramp();
 }
