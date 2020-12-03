@@ -32,6 +32,7 @@ APPS_X(DECLARE)
 #undef DECLARE
 
 static int g_retcode;
+static int delayed_wait;
 
 static const struct app
 {
@@ -72,7 +73,11 @@ static void exec(int argc, char *argv[])
 	int pid = os_fork();
 	if (pid)
 	{
-		os_waitpid(pid, &g_retcode);
+		if (!delayed_wait)
+		{
+			os_waitpid(pid, &g_retcode);
+		}
+
 		return;
 	}
 
@@ -199,8 +204,31 @@ static int shell(int argc, char *argv[])
 			int argc = 0;
 			while (arg)
 			{
-				argv[argc++] = arg;
-				arg = strtok_r(NULL, argsep, &starg);
+				if (!strcmp(arg, "&"))
+				{
+					argv[argc] = NULL;
+
+					if (!argc)
+					{
+						break;
+					}
+
+					delayed_wait = 1;
+					exec(argc, argv);
+
+					argc = 0;
+					for (int i = 0; i < ARRAY_SIZE(argv); i++)
+					{
+						argv[i] = NULL;
+					}
+
+					arg = strtok_r(NULL, argsep, &starg);
+				}
+				else
+				{
+					argv[argc++] = arg;
+					arg = strtok_r(NULL, argsep, &starg);
+				}
 			}
 			argv[argc] = NULL;
 
@@ -209,6 +237,7 @@ static int shell(int argc, char *argv[])
 				break;
 			}
 
+			delayed_wait = 0;
 			exec(argc, argv);
 
 			cmd = strtok_r(NULL, comsep, &stcmd);
